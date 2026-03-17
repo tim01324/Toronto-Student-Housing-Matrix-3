@@ -1,7 +1,10 @@
 import { Search, LayoutList, FileText, GitCompareArrows } from 'lucide-react';
+import { useNavigate } from 'react-router';
 
 interface StepIndicatorProps {
   currentStep: 1 | 2 | 3 | 4;
+  detailListingId?: string;
+  canGoToCompare?: boolean;
 }
 
 const steps = [
@@ -11,7 +14,28 @@ const steps = [
   { num: 4, label: 'Compare', icon: GitCompareArrows },
 ];
 
-export function StepIndicator({ currentStep }: StepIndicatorProps) {
+export function StepIndicator({
+  currentStep,
+  detailListingId,
+  canGoToCompare = false,
+}: StepIndicatorProps) {
+  const navigate = useNavigate();
+
+  const getNavigationTarget = (stepNum: number): string | null => {
+    if (stepNum === currentStep) return null;
+
+    switch (stepNum) {
+      case 1:
+        return currentStep === 2 ? '/' : null;
+      case 2:
+        return currentStep >= 3 ? '/results' : null;
+      case 4:
+        return currentStep === 2 && canGoToCompare ? '/compare' : null;
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="bg-white border-b border-gray-200">
       <div className="max-w-[1440px] mx-auto px-8 py-3">
@@ -20,10 +44,20 @@ export function StepIndicator({ currentStep }: StepIndicatorProps) {
             const Icon = step.icon;
             const isActive = step.num === currentStep;
             const isCompleted = step.num < currentStep;
+            const stepPath = getNavigationTarget(step.num);
+            const isClickable = Boolean(stepPath);
 
             return (
               <div key={step.num} className="flex items-center">
-                <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => stepPath && navigate(stepPath)}
+                  disabled={!isClickable}
+                  className={`flex items-center gap-2 transition-opacity ${
+                    isClickable ? 'cursor-pointer hover:opacity-85' : 'cursor-default'
+                  } ${!isClickable && !isActive ? 'opacity-60' : ''}`}
+                  aria-current={isActive ? 'step' : undefined}
+                >
                   <div
                     className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-all ${
                       isActive
@@ -58,7 +92,7 @@ export function StepIndicator({ currentStep }: StepIndicatorProps) {
                       {step.label}
                     </span>
                   </div>
-                </div>
+                </button>
 
                 {index < steps.length - 1 && (
                   <div

@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
-import { Clock, Shield, ChevronRight, Home, SlidersHorizontal, GraduationCap, MapPin } from 'lucide-react';
+import { Clock, Shield, ChevronRight, Home, SlidersHorizontal, GraduationCap, MapPin, Train, RefreshCw, Wifi, WifiOff, Loader2 } from 'lucide-react';
 import { StepIndicator } from '../components/StepIndicator';
 import { HousingMap } from '../components/HousingMap';
 import { PageTransition, FadeIn } from '../components/PageTransition';
 import { useCompare } from '../context/CompareContext';
-import { mockListings, Listing } from '../data/mockData';
+import { buildListings, Listing } from '../data/mockData';
+import { useTTCStops } from '../hooks/useTTCStops';
 
 export function Results() {
   const navigate = useNavigate();
@@ -20,6 +21,11 @@ export function Results() {
     safety: 25,
     amenities: 25,
   });
+  const { status: ttcStatus, stopsCount, cacheDate, refresh: refreshTTC } = useTTCStops();
+  const listings = useMemo(
+    () => buildListings(),
+    [ttcStatus, stopsCount, cacheDate?.getTime()],
+  );
 
   const handleListingClick = (id: string) => {
     navigate(`/listing/${id}`);
@@ -77,7 +83,7 @@ export function Results() {
         </header>
 
         {/* Step Indicator */}
-        <StepIndicator currentStep={2} />
+        <StepIndicator currentStep={2} canGoToCompare={compareList.length >= 2} />
 
         {/* Search Summary Banner */}
         <div className="bg-blue-50 border-b border-blue-100">
@@ -229,12 +235,12 @@ export function Results() {
             <div className="p-6">
               <div className="flex items-center justify-between mb-4">
                 <h2 className="text-base font-semibold text-gray-900">
-                  {mockListings.length} Listings Found
+                  {listings.length} Listings Found
                 </h2>
                 <span className="text-xs text-gray-500">Sorted by Value Score</span>
               </div>
               <div className="space-y-3">
-                {mockListings.map((listing) => (
+                {listings.map((listing) => (
                   <div
                     key={listing.id}
                     onClick={() => handleListingClick(listing.id)}
@@ -259,7 +265,7 @@ export function Results() {
                             ${listing.rent}<span className="text-sm font-normal text-gray-500">/mo</span>
                           </div>
 
-                          <div className="flex items-center gap-4">
+                          <div className="flex items-center gap-3 flex-wrap">
                             <div className="flex items-center gap-1.5 text-gray-600">
                               <Clock size={13} />
                               <span>{listing.commute} min</span>
@@ -271,7 +277,22 @@ export function Results() {
                                 {listing.safety}
                               </span>
                             </div>
+
+                            <div className="flex items-center gap-1 text-gray-500 text-xs">
+                              <span className="text-gray-400">Crime:</span>
+                              <span className={`font-semibold ${
+                                listing.crimeRatePer1000 < 35 ? 'text-green-600' :
+                                listing.crimeRatePer1000 < 55 ? 'text-yellow-600' : 'text-red-600'
+                              }`}>{listing.crimeRatePer1000}/1k</span>
+                            </div>
                           </div>
+
+                          {listing.nearestStops?.[0] && (
+                            <div className="flex items-center gap-1.5 text-xs text-blue-700 mt-1.5">
+                              <Train size={11} className="flex-shrink-0" />
+                              <span className="truncate">{listing.nearestStops[0].stop.name} · {listing.nearestStops[0].walkMinutes} min walk</span>
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -309,13 +330,34 @@ export function Results() {
           {/* Right Panel - Mapbox Map */}
           <div className="w-[58%] relative">
             <HousingMap
-              listings={mockListings}
+              listings={listings}
               selectedListing={selectedListing}
               onListingClick={(id) => handleListingClick(id)}
               campusLat={43.6629}
               campusLng={-79.3957}
               campusName="U of T — St. George"
+              transitDataVersion={`${ttcStatus}:${stopsCount}:${cacheDate?.getTime() ?? 0}`}
             />
+            {/* TTC Live Data Status Badge */}
+            <div className="absolute bottom-8 left-2 z-10 flex items-center gap-1.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-full px-3 py-1.5 shadow-sm text-xs">
+              {ttcStatus === 'loading' && (
+                <><Loader2 size={12} className="animate-spin text-blue-600" /><span className="text-gray-600">Loading TTC data…</span></>
+              )}
+              {ttcStatus === 'live' && (
+                <><Wifi size={12} className="text-green-600" /><span className="text-gray-700 font-medium">TTC Live</span><span className="text-gray-400">·</span><span className="text-gray-500">{stopsCount} stops</span></>
+              )}
+              {ttcStatus === 'cached' && (
+                <><Wifi size={12} className="text-blue-500" /><span className="text-gray-700 font-medium">TTC Cached</span>{cacheDate && <span className="text-gray-400 hidden sm:inline"> · {cacheDate.toLocaleDateString()}</span>}</>
+              )}
+              {ttcStatus === 'error' && (
+                <><WifiOff size={12} className="text-orange-500" /><span className="text-gray-600">TTC static data</span></>
+              )}
+              {(ttcStatus === 'cached' || ttcStatus === 'error' || ttcStatus === 'live') && (
+                <button onClick={refreshTTC} title="Refresh TTC data" className="ml-1 text-gray-400 hover:text-blue-600 transition-colors">
+                  <RefreshCw size={11} />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>

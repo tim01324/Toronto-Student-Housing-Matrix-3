@@ -98,7 +98,11 @@ export function Compare() {
         </header>
 
         {/* Step Indicator */}
-        <StepIndicator currentStep={4} />
+        <StepIndicator
+          currentStep={4}
+          detailListingId={compareListings[0]?.id}
+          canGoToCompare={compareListings.length >= 2}
+        />
 
         {/* Main Content */}
         <main className="max-w-[1440px] mx-auto px-8 py-8">

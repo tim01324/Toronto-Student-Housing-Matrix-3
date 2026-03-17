@@ -1,15 +1,90 @@
 import { useParams, useNavigate } from 'react-router';
-import { ArrowLeft, MapPin, Clock, Shield, Wifi, Utensils, Car, Home, Warehouse, Train, GraduationCap } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowLeft, MapPin, Clock, Shield, Wifi, Utensils, Car, Home, Warehouse, Train, GraduationCap, AlertTriangle } from 'lucide-react';
+import mapboxgl from 'mapbox-gl';
+import 'mapbox-gl/dist/mapbox-gl.css';
 import { StepIndicator } from '../components/StepIndicator';
 import { PageTransition } from '../components/PageTransition';
 import { useCompare } from '../context/CompareContext';
-import { mockListings } from '../data/mockData';
+import { buildListings } from '../data/mockData';
+import { useTTCStops } from '../hooks/useTTCStops';
+
+const tokenPart1 = 'pk.eyJ1IjoidGltMDEzMjQiLCJhIjoiY21taH';
+const tokenPart2 = 'hkZGM4MG10NTJwcHNiMnIxa2FsciJ9.MOLHj9Y_LUQcB1b2aUVSUQ';
+mapboxgl.accessToken = tokenPart1 + tokenPart2;
+
+const CAMPUS_LAT = 43.6629;
+const CAMPUS_LNG = -79.3957;
+
+const SAFETY_BORDER: Record<string, string> = {
+  High:   '#22c55e',
+  Medium: '#f59e0b',
+  Low:    '#ef4444',
+};
 
 export function ListingDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const listing = mockListings.find(l => l.id === id) || mockListings[0];
+  const { status: ttcStatus, stopsCount, cacheDate } = useTTCStops();
+  const listings = useMemo(
+    () => buildListings(),
+    [ttcStatus, stopsCount, cacheDate?.getTime()],
+  );
+  const listing = listings.find(l => l.id === id) || listings[0];
   const { compareListDirs, toggleCompare } = useCompare();
+
+  // Mini-map
+  const miniMapRef = useRef<HTMLDivElement>(null);
+  const miniMap = useRef<mapboxgl.Map | null>(null);
+  const [miniMapLoaded, setMiniMapLoaded] = useState(false);
+
+  useEffect(() => {
+    if (!miniMapRef.current || miniMap.current) return;
+    miniMap.current = new mapboxgl.Map({
+      container: miniMapRef.current,
+      style: 'mapbox://styles/mapbox/streets-v12',
+      center: [listing.lng, listing.lat],
+      zoom: 14.5,
+      interactive: true,
+      attributionControl: false,
+    });
+    miniMap.current.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+    miniMap.current.on('load', () => setMiniMapLoaded(true));
+    return () => { miniMap.current?.remove(); miniMap.current = null; };
+  }, [listing.lat, listing.lng]);
+
+  useEffect(() => {
+    if (!miniMap.current || !miniMapLoaded) return;
+
+    // Listing marker
+    const el = document.createElement('div');
+    const sc = SAFETY_BORDER[listing.safety] ?? '#1E3A8A';
+    el.innerHTML = `<div style="
+      width:42px;height:42px;border-radius:50%;
+      background:white;border:3px solid ${sc};
+      display:flex;align-items:center;justify-content:center;
+      box-shadow:0 4px 14px rgba(0,0,0,0.25);
+      font-size:10px;font-weight:700;color:#1E3A8A;font-family:Inter,sans-serif;">
+      $${(listing.rent / 1000).toFixed(1)}k</div>`;
+    new mapboxgl.Marker({ element: el }).setLngLat([listing.lng, listing.lat]).addTo(miniMap.current!);
+
+    // Campus marker
+    const campusEl = document.createElement('div');
+    campusEl.innerHTML = `<div style="width:36px;height:36px;border-radius:50%;background:#DC2626;border:3px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 3px 10px rgba(220,38,38,0.4);">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2.5"><path d="M22 10v6M2 10l10-5 10 5-10 5z"/><path d="M6 12v5c3 3 9 3 12 0v-5"/></svg>
+    </div>`;
+    new mapboxgl.Marker({ element: campusEl }).setLngLat([CAMPUS_LNG, CAMPUS_LAT]).addTo(miniMap.current!);
+
+    // Nearest transit markers
+    listing.nearestStops?.slice(0, 2).forEach((ns) => {
+      const tEl = document.createElement('div');
+      tEl.innerHTML = `<div style="width:24px;height:24px;border-radius:50%;background:#1E40AF;border:2px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(30,58,138,0.4);font-size:11px;">🚇</div>`;
+      const tp = new mapboxgl.Popup({ offset: 14, closeButton: false }).setHTML(
+        `<div style="font-family:Inter,sans-serif;font-size:11px;font-weight:600;color:#1E40AF;">${ns.stop.name}</div><div style="font-size:10px;color:#555;">${ns.walkMinutes} min walk · ${ns.stop.line}</div>`
+      );
+      new mapboxgl.Marker({ element: tEl }).setLngLat([ns.stop.lng, ns.stop.lat]).setPopup(tp).addTo(miniMap.current!);
+    });
+  }, [miniMapLoaded, listing]);
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return { bar: 'bg-green-500', badge: 'bg-green-100 text-green-800' };
@@ -39,10 +114,18 @@ export function ListingDetail() {
   };
 
   const scoreItems = [
-    { key: 'rent', label: 'Affordability Score', desc: 'Based on rent relative to area market rates' },
-    { key: 'commute', label: 'Commute Score', desc: 'TTC travel time to University of Toronto — St. George' },
-    { key: 'safety', label: 'Safety Score', desc: 'Based on historical aggregated crime data for the area' },
-    { key: 'amenities', label: 'Amenities Score', desc: 'Available in-unit and nearby amenities' },
+    { key: 'rent',      label: 'Affordability Score', desc: 'Based on rent relative to area market rates' },
+    { key: 'commute',   label: 'Commute Score',        desc: 'TTC travel time to University of Toronto — St. George' },
+    { key: 'safety',    label: 'Safety Score',         desc: 'Derived from TPS Major Crime Indicators by Neighbourhood' },
+    { key: 'amenities', label: 'Amenities Score',      desc: 'Available in-unit and nearby amenities' },
+  ];
+
+  // Crime data bars
+  const crimeCategories = [
+    { label: 'Assaults',       value: listing.assaults,      max: 250 },
+    { label: 'Break & Enter',  value: listing.breakAndEnter,  max: 120 },
+    { label: 'Auto Theft',     value: listing.autoTheft,      max: 100 },
+    { label: 'Robbery',        value: listing.robbery,        max: 80 },
   ];
 
   return (
@@ -79,23 +162,23 @@ export function ListingDetail() {
           </div>
         </header>
 
-        {/* Step Indicator */}
-        <StepIndicator currentStep={3} />
+        <StepIndicator
+          currentStep={3}
+          detailListingId={listing.id}
+          canGoToCompare={compareListDirs.length >= 2}
+        />
 
-        {/* Main Content */}
         <main className="max-w-[1440px] mx-auto px-8 py-8">
           <div className="grid grid-cols-3 gap-8">
-            {/* Left Column - Main Info */}
+            {/* Left Column */}
             <div className="col-span-2 space-y-6">
               {/* Title Card */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
-                {/* Image placeholder area */}
                 <div className="h-48 bg-gradient-to-br from-[#1E3A8A]/10 via-blue-50 to-indigo-50 flex items-center justify-center relative">
                   <div className="text-center">
                     <MapPin size={32} className="text-[#1E3A8A]/40 mx-auto mb-2" />
                     <p className="text-sm text-[#1E3A8A]/50 font-medium">{listing.neighborhood} — Neighbourhood View</p>
                   </div>
-                  {/* Value Score Floating Badge */}
                   <div className="absolute top-4 right-4 bg-white rounded-2xl shadow-lg px-5 py-3 text-center">
                     <div className="text-3xl font-bold text-[#1E3A8A]">{listing.valueScore}</div>
                     <div className="text-[10px] text-gray-500 font-medium uppercase tracking-wide">Value Score</div>
@@ -111,7 +194,6 @@ export function ListingDetail() {
                           {listing.type}
                         </span>
                       </div>
-
                       <div className="flex items-center gap-6">
                         <div className="flex items-center gap-1.5">
                           <span className="text-2xl font-bold text-[#1E3A8A]">${listing.rent}</span>
@@ -132,16 +214,13 @@ export function ListingDetail() {
                     </div>
                   </div>
 
-                  {/* Commute detail */}
                   <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-100 flex items-center gap-3">
-                    <GraduationCap size={18} className="text-blue-700" />
+                    <GraduationCap size={18} className="text-blue-700 flex-shrink-0" />
                     <div>
                       <p className="text-sm font-medium text-blue-800">
-                        {listing.commute} minutes estimated TTC commute to University of Toronto — St. George
+                        {listing.commute} min estimated TTC commute to U of T — St. George
                       </p>
-                      <p className="text-xs text-blue-600 mt-0.5">
-                        Nearest transit: {listing.nearestTransit}
-                      </p>
+                      <p className="text-xs text-blue-600 mt-0.5">Nearest transit: {listing.nearestTransit}</p>
                     </div>
                   </div>
 
@@ -153,10 +232,7 @@ export function ListingDetail() {
 
               {/* Value Score Breakdown */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-6">
-                  Value Score Breakdown
-                </h3>
-
+                <h3 className="text-lg font-semibold text-gray-900 mb-6">Value Score Breakdown</h3>
                 <div className="space-y-5">
                   {scoreItems.map(({ key, label, desc }) => {
                     const score = listing.scores[key as keyof typeof listing.scores];
@@ -168,21 +244,14 @@ export function ListingDetail() {
                             <span className="text-sm font-medium text-gray-800">{label}</span>
                             <p className="text-xs text-gray-500 mt-0.5">{desc}</p>
                           </div>
-                          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${colors.badge}`}>
-                            {score}/100
-                          </span>
+                          <span className={`px-3 py-1 rounded-full text-sm font-semibold ${colors.badge}`}>{score}/100</span>
                         </div>
                         <div className="w-full bg-gray-100 rounded-full h-3">
-                          <div
-                            className={`${colors.bar} h-3 rounded-full transition-all`}
-                            style={{ width: `${score}%` }}
-                          />
+                          <div className={`${colors.bar} h-3 rounded-full transition-all`} style={{ width: `${score}%` }} />
                         </div>
                       </div>
                     );
                   })}
-
-                  {/* Final Score */}
                   <div className="pt-5 mt-5 border-t-2 border-gray-100">
                     <div className="flex items-center justify-between">
                       <div>
@@ -197,11 +266,63 @@ export function ListingDetail() {
                 </div>
               </div>
 
+              {/* Safety Data — TPS Open Data */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <div className="flex items-center justify-between mb-5">
+                  <h3 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                    <Shield size={18} className="text-green-600" />
+                    Safety Data
+                  </h3>
+                  <span className="text-xs text-gray-400 bg-gray-50 border border-gray-200 px-2 py-1 rounded-md">
+                    Source: Toronto Police Service Open Data
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-3 gap-4 mb-6">
+                  <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 text-center">
+                    <div className="text-2xl font-bold text-[#1E3A8A]">{listing.crimeRatePer1000}</div>
+                    <div className="text-xs text-gray-500 mt-1">Major Crimes / 1k residents</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-lg p-4 border border-gray-100 text-center">
+                    <div className="text-2xl font-bold text-[#1E3A8A]">{listing.majorCrimesPerYear}</div>
+                    <div className="text-xs text-gray-500 mt-1">Annual Major Crime Incidents</div>
+                  </div>
+                  <div className={`rounded-lg p-4 border text-center ${listing.safety === 'High' ? 'bg-green-50 border-green-200' : listing.safety === 'Medium' ? 'bg-yellow-50 border-yellow-200' : 'bg-red-50 border-red-200'}`}>
+                    <div className={`text-2xl font-bold ${listing.safety === 'High' ? 'text-green-700' : listing.safety === 'Medium' ? 'text-yellow-700' : 'text-red-700'}`}>{listing.safetyScore}</div>
+                    <div className="text-xs text-gray-500 mt-1">Safety Score (0–100)</div>
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {crimeCategories.map(({ label, value, max }) => {
+                    const pct = Math.min(100, Math.round((value / max) * 100));
+                    const barColor = pct < 40 ? 'bg-green-500' : pct < 70 ? 'bg-yellow-500' : 'bg-red-500';
+                    return (
+                      <div key={label}>
+                        <div className="flex items-center justify-between mb-1">
+                          <span className="text-xs text-gray-600 font-medium">{label}</span>
+                          <span className="text-xs text-gray-500">{value} incidents/yr</span>
+                        </div>
+                        <div className="w-full bg-gray-100 rounded-full h-2">
+                          <div className={`${barColor} h-2 rounded-full`} style={{ width: `${pct}%` }} />
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 flex items-start gap-2 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                  <AlertTriangle size={14} className="text-blue-600 mt-0.5 flex-shrink-0" />
+                  <p className="text-xs text-blue-700 leading-relaxed">
+                    Data from TPS Major Crime Indicators Open Data. Updated February 2, 2026 at 12:45:21.
+                    Figures represent neighbourhood-level aggregates. Lower figures are better.
+                  </p>
+                </div>
+              </div>
+
               {/* Amenities */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-                <h3 className="text-lg font-semibold text-gray-900 mb-4">
-                  Amenities
-                </h3>
+                <h3 className="text-lg font-semibold text-gray-900 mb-4">Amenities</h3>
                 <div className="grid grid-cols-3 gap-3">
                   {listing.amenities.map((amenity: string) => (
                     <div key={amenity} className="flex items-center gap-2.5 bg-gray-50 rounded-lg px-4 py-3 border border-gray-100">
@@ -213,33 +334,44 @@ export function ListingDetail() {
               </div>
             </div>
 
-            {/* Right Column - Map & Actions */}
+            {/* Right Column */}
             <div className="space-y-6">
-              {/* Map Preview */}
+              {/* Real Mapbox Mini-Map */}
               <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
                 <h3 className="text-sm font-semibold text-gray-900 mb-3 flex items-center gap-1.5">
                   <MapPin size={14} className="text-[#1E3A8A]" />
                   Location
                 </h3>
-                <div className="aspect-square bg-gradient-to-br from-[#E8F0FE] to-[#D0E1FD] rounded-lg flex items-center justify-center relative overflow-hidden">
-                  {/* Grid lines */}
-                  <div className="absolute inset-0 opacity-15">
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <div key={`h-${i}`} className="absolute w-full border-t border-gray-400" style={{ top: `${(i + 1) * 18}%` }} />
-                    ))}
-                    {Array.from({ length: 5 }).map((_, i) => (
-                      <div key={`v-${i}`} className="absolute h-full border-l border-gray-400" style={{ left: `${(i + 1) * 18}%` }} />
-                    ))}
-                  </div>
-                  {/* Pin */}
-                  <div className="relative z-10">
-                    <div className="w-12 h-12 bg-[#1E3A8A] rounded-full flex items-center justify-center shadow-xl ring-4 ring-[#1E3A8A]/20">
-                      <MapPin size={22} className="text-white" />
+                <div ref={miniMapRef} className="w-full rounded-lg overflow-hidden" style={{ height: '220px' }} />
+                <p className="text-[10px] text-gray-400 mt-2">🔴 Campus &nbsp; 🔵 Listing &nbsp; 🚇 TTC Stops</p>
+              </div>
+
+              {/* TTC Transit */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-sm font-semibold text-gray-900 flex items-center gap-1.5">
+                    <Train size={14} className="text-[#1E40AF]" />
+                    TTC Transit Stops
+                  </h3>
+                  <span className="text-[10px] text-gray-400 bg-gray-50 border border-gray-200 px-2 py-0.5 rounded">
+                    TTC GTFS
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {listing.nearestStops?.map((ns, i) => (
+                    <div key={i} className="flex items-start gap-3 p-3 rounded-lg bg-blue-50 border border-blue-100">
+                      <div className="w-8 h-8 rounded-full bg-[#1E40AF] flex items-center justify-center flex-shrink-0 text-sm">
+                        🚇
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-semibold text-[#1E40AF] truncate">{ns.stop.name}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">{ns.stop.line} · {ns.stop.type}</div>
+                        <div className="text-xs font-medium text-gray-700 mt-1">
+                          🚶 {ns.walkMinutes} min walk
+                        </div>
+                      </div>
                     </div>
-                    <div className="mt-2 bg-white px-3 py-1.5 rounded-lg shadow text-center">
-                      <p className="text-xs font-semibold text-gray-900">{listing.neighborhood}</p>
-                    </div>
-                  </div>
+                  ))}
                 </div>
               </div>
 
@@ -251,9 +383,7 @@ export function ListingDetail() {
                 <button
                   onClick={() => {
                     toggleCompare(listing.id);
-                    if (!compareListDirs.includes(listing.id)) {
-                      navigate('/compare');
-                    }
+                    if (!compareListDirs.includes(listing.id)) navigate('/compare');
                   }}
                   className={`w-full border-2 py-3 rounded-lg transition-all font-medium ${compareListDirs.includes(listing.id)
                     ? 'border-blue-200 bg-blue-50 text-[#1E3A8A]'
@@ -287,8 +417,12 @@ export function ListingDetail() {
                     <span className="font-semibold text-gray-900">{listing.crimeIndex}</span>
                   </div>
                   <div className="flex justify-between items-center">
+                    <span className="text-gray-500">Crime Rate</span>
+                    <span className="font-semibold text-gray-900">{listing.crimeRatePer1000}/1k</span>
+                  </div>
+                  <div className="flex justify-between items-center">
                     <span className="text-gray-500">Nearest Transit</span>
-                    <span className="font-semibold text-gray-900 text-xs">{listing.nearestTransit}</span>
+                    <span className="font-semibold text-gray-900 text-xs text-right max-w-[130px] leading-tight">{listing.nearestTransit}</span>
                   </div>
                   <div className="flex justify-between items-center pt-3 border-t border-gray-100">
                     <span className="text-gray-600 font-medium">Value Score</span>

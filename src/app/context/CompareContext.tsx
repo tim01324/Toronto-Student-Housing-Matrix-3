@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, ReactNode } from 'react';
+import React, { createContext, useCallback, useContext, useMemo, useState, ReactNode } from 'react';
 import { Listing, mockListings } from '../data/mockData';
 
 interface CompareContextType {
@@ -15,7 +15,7 @@ const CompareContext = createContext<CompareContextType | undefined>(undefined);
 export function CompareProvider({ children }: { children: ReactNode }) {
     const [compareListDirs, setCompareListDirs] = useState<string[]>([]);
 
-    const addToCompare = (id: string) => {
+    const addToCompare = useCallback((id: string) => {
         setCompareListDirs((prev) => {
             // Limit to 3 items for the radar chart layout
             if (prev.length >= 3 && !prev.includes(id)) {
@@ -26,13 +26,13 @@ export function CompareProvider({ children }: { children: ReactNode }) {
             }
             return prev;
         });
-    };
+    }, []);
 
-    const removeFromCompare = (id: string) => {
+    const removeFromCompare = useCallback((id: string) => {
         setCompareListDirs((prev) => prev.filter(item => item !== id));
-    };
+    }, []);
 
-    const toggleCompare = (id: string) => {
+    const toggleCompare = useCallback((id: string) => {
         setCompareListDirs((prev) => {
             if (prev.includes(id)) {
                 return prev.filter(item => item !== id);
@@ -43,20 +43,29 @@ export function CompareProvider({ children }: { children: ReactNode }) {
                 return [...prev, id];
             }
         });
-    };
+    }, []);
 
-    const getCompareListings = () => {
+    const getCompareListings = useCallback(() => {
         return compareListDirs
             .map(id => mockListings.find(l => l.id === id))
             .filter((l): l is Listing => l !== undefined);
-    };
+    }, [compareListDirs]);
 
-    const clearCompare = () => {
+    const clearCompare = useCallback(() => {
         setCompareListDirs([]);
-    };
+    }, []);
+
+    const value = useMemo(() => ({
+        compareListDirs,
+        addToCompare,
+        removeFromCompare,
+        toggleCompare,
+        getCompareListings,
+        clearCompare,
+    }), [compareListDirs, addToCompare, removeFromCompare, toggleCompare, getCompareListings, clearCompare]);
 
     return (
-        <CompareContext.Provider value={{ compareListDirs, addToCompare, removeFromCompare, toggleCompare, getCompareListings, clearCompare }}>
+        <CompareContext.Provider value={value}>
             {children}
         </CompareContext.Provider>
     );

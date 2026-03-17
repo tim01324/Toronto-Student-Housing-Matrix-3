@@ -1,17 +1,23 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { Search, MapPin, Clock, Shield, SlidersHorizontal, GraduationCap, Home } from 'lucide-react';
 import { StepIndicator } from '../components/StepIndicator';
 import { PageTransition, FadeIn } from '../components/PageTransition';
+import { useCompare } from '../context/CompareContext';
 
 export function Landing() {
   const navigate = useNavigate();
+  const { clearCompare } = useCompare();
   const [campus, setCampus] = useState('');
   const [priceMin, setPriceMin] = useState(500);
   const [priceMax, setPriceMax] = useState(2000);
   const [housingType, setHousingType] = useState('');
   const [maxCommute, setMaxCommute] = useState(30);
   const [safetyLevel, setSafetyLevel] = useState('all');
+
+  useEffect(() => {
+    clearCompare();
+  }, [clearCompare]);
 
   const handleSearch = () => {
     navigate('/results');
