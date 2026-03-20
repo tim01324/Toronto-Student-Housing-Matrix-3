@@ -5,8 +5,9 @@ import { StepIndicator } from '../components/StepIndicator';
 import { HousingMap } from '../components/HousingMap';
 import { PageTransition, FadeIn } from '../components/PageTransition';
 import { useCompare } from '../context/CompareContext';
-import { buildListings, Listing } from '../data/mockData';
+import { buildListings, Listing, mockListings } from '../data/mockData';
 import { useTTCStops } from '../hooks/useTTCStops';
+import { useNearbyAmenities } from '../hooks/useNearbyAmenities';
 
 export function Results() {
   const navigate = useNavigate();
@@ -22,9 +23,11 @@ export function Results() {
     amenities: 25,
   });
   const { status: ttcStatus, stopsCount, cacheDate, refresh: refreshTTC } = useTTCStops();
+  const listingsForCoords = useMemo(() => mockListings.map(l => ({ id: l.id, lat: l.lat, lng: l.lng })), []);
+  const { status: osmStatus, poiData, cacheDate: osmCacheDate, refresh: refreshOSM } = useNearbyAmenities(listingsForCoords);
   const listings = useMemo(
-    () => buildListings(),
-    [ttcStatus, stopsCount, cacheDate?.getTime()],
+    () => buildListings(poiData),
+    [ttcStatus, stopsCount, cacheDate?.getTime(), osmStatus, osmCacheDate?.getTime(), poiData],
   );
 
   const handleListingClick = (id: string) => {
@@ -285,6 +288,13 @@ export function Results() {
                                 listing.crimeRatePer1000 < 55 ? 'text-yellow-600' : 'text-red-600'
                               }`}>{listing.crimeRatePer1000}/1k</span>
                             </div>
+
+                            {listing.nearbyPOIs && listing.nearbyPOIs.length > 0 && (
+                              <div className="flex items-center gap-1 text-gray-600 text-xs whitespace-nowrap">
+                                <span>🛒</span>
+                                <span className="font-medium">{listing.nearbyPOIs.length} Services nearby</span>
+                              </div>
+                            )}
                           </div>
 
                           {listing.nearestStops?.[0] && (
@@ -337,9 +347,11 @@ export function Results() {
               campusLng={-79.3957}
               campusName="U of T — St. George"
               transitDataVersion={`${ttcStatus}:${stopsCount}:${cacheDate?.getTime() ?? 0}`}
+              poiData={poiData}
             />
-            {/* TTC Live Data Status Badge */}
-            <div className="absolute bottom-8 left-2 z-10 flex items-center gap-1.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-full px-3 py-1.5 shadow-sm text-xs">
+            {/* Status Badges */}
+            <div className="absolute bottom-8 left-2 z-10 flex flex-col gap-2">
+              <div className="flex items-center gap-1.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-full px-3 py-1.5 shadow-sm text-xs">
               {ttcStatus === 'loading' && (
                 <><Loader2 size={12} className="animate-spin text-blue-600" /><span className="text-gray-600">Loading TTC data…</span></>
               )}
@@ -357,6 +369,26 @@ export function Results() {
                   <RefreshCw size={11} />
                 </button>
               )}
+              </div>
+              <div className="flex items-center gap-1.5 bg-white/90 backdrop-blur-sm border border-gray-200 rounded-full px-3 py-1.5 shadow-sm text-xs">
+                {osmStatus === 'loading' && (
+                  <><Loader2 size={12} className="animate-spin text-green-600" /><span className="text-gray-600">Loading OSM data…</span></>
+                )}
+                {osmStatus === 'live' && (
+                  <><Wifi size={12} className="text-green-600" /><span className="text-gray-700 font-medium">OSM Live</span><span className="text-gray-400">·</span><span className="text-gray-500">{(poiData?.size || 0)} properties</span></>
+                )}
+                {osmStatus === 'cached' && (
+                  <><Wifi size={12} className="text-blue-500" /><span className="text-gray-700 font-medium">OSM Cached</span>{osmCacheDate && <span className="text-gray-400 hidden sm:inline"> · {osmCacheDate.toLocaleDateString()}</span>}</>
+                )}
+                {osmStatus === 'error' && (
+                  <><WifiOff size={12} className="text-orange-500" /><span className="text-gray-600">OSM static data</span></>
+                )}
+                {(osmStatus === 'cached' || osmStatus === 'error' || osmStatus === 'live') && (
+                  <button onClick={refreshOSM} title="Refresh OSM data" className="ml-1 text-gray-400 hover:text-green-600 transition-colors">
+                    <RefreshCw size={11} />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>

@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import mapboxgl from 'mapbox-gl';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { getSubwayStations, TransitStop } from '../services/transitData';
+import { NearbyPOI } from '../services/osmAmenityService';
 
 const tokenPart1 = 'pk.eyJ1IjoidGltMDEzMjQiLCJhIjoiY21taH';
 const tokenPart2 = 'hkZGM4MG10NTJwcHNiMnIxa2FsciJ9.MOLHj9Y_LUQcB1b2aUVSUQ';
@@ -28,6 +29,7 @@ interface HousingMapProps {
     campusLng?: number;
     campusName?: string;
     transitDataVersion?: string;
+    poiData?: Map<string, NearbyPOI[]>;
 }
 
 const SAFETY_COLORS: Record<string, { border: string; glow: string; dot: string }> = {
@@ -58,13 +60,28 @@ export function HousingMap({
     campusLng = -79.3957,
     campusName = 'U of T — St. George',
     transitDataVersion = 'static',
+    poiData,
 }: HousingMapProps) {
     const mapContainer = useRef<HTMLDivElement>(null);
     const map = useRef<mapboxgl.Map | null>(null);
     const markersRef = useRef<mapboxgl.Marker[]>([]);
     const subwayMarkersRef = useRef<mapboxgl.Marker[]>([]);
+    const poiMarkersRef = useRef<mapboxgl.Marker[]>([]);
     const [mapLoaded, setMapLoaded] = useState(false);
     const [showSubway, setShowSubway] = useState(true);
+    const [showPOIs, setShowPOIs] = useState(false);
+
+    // Extract unique POIs for rendering
+    const uniquePOIs = useMemo(() => {
+        if (!poiData) return [];
+        const map = new Map<string, NearbyPOI>();
+        for (const pois of poiData.values()) {
+            for (const poi of pois) {
+                map.set(poi.poi_id, poi);
+            }
+        }
+        return Array.from(map.values());
+    }, [poiData]);
 
     // Initialize map
     useEffect(() => {
@@ -239,6 +256,48 @@ export function HousingMap({
         });
     }, [mapLoaded, showSubway, transitDataVersion]);
 
+    // OSM POI markers
+    useEffect(() => {
+        if (!map.current || !mapLoaded) return;
+
+        poiMarkersRef.current.forEach(m => m.remove());
+        poiMarkersRef.current = [];
+
+        if (!showPOIs) return;
+
+        uniquePOIs.forEach((poi) => {
+            const el = document.createElement('div');
+            let icon = '📍';
+            let color = '#6b7280';
+            
+            if (poi.category === 'supermarket') { icon = '🛒'; color = '#16a34a'; }
+            if (poi.category === 'pharmacy') { icon = '➕'; color = '#dc2626'; }
+            if (poi.category === 'library') { icon = '📚'; color = '#2563eb'; }
+
+            el.innerHTML = `
+            <div style="
+              width: 24px; height: 24px; border-radius: 50%;
+              background: ${color}; border: 2px solid white;
+              display: flex; align-items: center; justify-content: center;
+              box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+              font-size: 11px; cursor: pointer;
+            ">${icon}</div>`;
+
+            const popup = new mapboxgl.Popup({ offset: 14, closeButton: false })
+                .setHTML(`
+                <div style="font-family:Inter,sans-serif;padding:4px;">
+                  <div style="font-weight:700;font-size:12px;color:${color};text-transform:capitalize;">${icon} ${poi.name}</div>
+                  <div style="font-size:10px;color:#666;margin-top:2px;text-transform:capitalize;">${poi.category}</div>
+                </div>`);
+
+            const marker = new mapboxgl.Marker({ element: el })
+                .setLngLat([poi.lng, poi.lat])
+                .setPopup(popup)
+                .addTo(map.current!);
+            poiMarkersRef.current.push(marker);
+        });
+    }, [mapLoaded, showPOIs, uniquePOIs]);
+
     // Highlight selected listing
     useEffect(() => {
         if (!mapLoaded) return;
@@ -270,8 +329,8 @@ export function HousingMap({
         <div className="w-full h-full relative">
             <div ref={mapContainer} className="w-full h-full" />
 
-            {/* Subway toggle */}
-            <div className="absolute top-4 left-4 z-10">
+            {/* Toggles */}
+            <div className="absolute top-4 left-4 z-10 flex gap-2">
                 <button
                     onClick={() => setShowSubway(v => !v)}
                     className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold shadow-md border transition-all ${showSubway
@@ -280,6 +339,15 @@ export function HousingMap({
                         }`}
                 >
                     🚇 TTC Subway
+                </button>
+                <button
+                    onClick={() => setShowPOIs(v => !v)}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold shadow-md border transition-all ${showPOIs
+                        ? 'bg-[#047857] text-white border-[#047857]'
+                        : 'bg-white text-gray-600 border-gray-200 hover:border-[#047857]'
+                        }`}
+                >
+                    🛒 Nearby Services
                 </button>
             </div>
 
@@ -309,9 +377,22 @@ export function HousingMap({
                             TTC Subway Station
                         </div>
                     )}
+                    {showPOIs && (
+                        <div className="pt-1 border-t border-gray-100 mt-1 space-y-1">
+                            <div className="flex items-center gap-2 text-xs text-gray-600">
+                                <span className="text-sm">🛒</span> Supermarket
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-gray-600">
+                                <span className="text-sm">➕</span> Pharmacy
+                            </div>
+                            <div className="flex items-center gap-2 text-xs text-gray-600">
+                                <span className="text-sm">📚</span> Library
+                            </div>
+                        </div>
+                    )}
                 </div>
                 <p className="text-[9px] text-gray-400 mt-2.5 leading-tight">
-                    Safety: TPS Open Data<br />Transit: TTC GTFS
+                    Safety: TPS Open Data<br />Transit: TTC GTFS<br />Amenities: OSM Overpass
                 </p>
             </div>
         </div>

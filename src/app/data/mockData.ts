@@ -1,5 +1,7 @@
 import { getSafetyStats } from '../services/safetyData';
 import { getNearestTransitStops, NearestStop } from '../services/transitData';
+import { NearbyPOI } from '../services/osmAmenityService';
+import { calculateAmenityScore } from '../services/amenityScoring';
 
 export interface Listing {
     id: string;
@@ -26,9 +28,10 @@ export interface Listing {
     robbery: number;
     dataSource: string;
     nearestStops: NearestStop[];
+    nearbyPOIs?: NearbyPOI[];
 }
 
-export function buildListings(): Listing[] {
+export function buildListings(poiData?: Map<string, NearbyPOI[]>): Listing[] {
     const raw = [
         {
             id: '1',
@@ -121,8 +124,22 @@ export function buildListings(): Listing[] {
         const nearestStops = getNearestTransitStops(r.lat, r.lng);
         const primaryStop = nearestStops[0];
 
+        let finalAmenitiesScore = r.scores.amenities;
+        let finalValueScore = r.valueScore;
+        let nearbyPOIs: NearbyPOI[] | undefined;
+
+        if (poiData && poiData.has(r.id)) {
+            nearbyPOIs = poiData.get(r.id);
+            if (nearbyPOIs) {
+                finalAmenitiesScore = calculateAmenityScore(r.lat, r.lng, nearbyPOIs);
+                finalValueScore = Math.round((r.scores.rent + r.scores.commute + r.scores.safety + finalAmenitiesScore) / 4);
+            }
+        }
+
         return {
             ...r,
+            valueScore: finalValueScore,
+            scores: { ...r.scores, amenities: finalAmenitiesScore },
             crimeIndex: safety?.safetyLevel === 'High' ? 'Low' : safety?.safetyLevel === 'Medium' ? 'Moderate' : 'High',
             nearestTransit: primaryStop
                 ? `${primaryStop.stop.name} (${primaryStop.walkMinutes} min walk)`
@@ -136,6 +153,7 @@ export function buildListings(): Listing[] {
             robbery: safety?.robbery ?? 0,
             dataSource: safety?.source ?? 'Toronto Police Service Open Data',
             nearestStops,
+            nearbyPOIs,
         };
     });
 }

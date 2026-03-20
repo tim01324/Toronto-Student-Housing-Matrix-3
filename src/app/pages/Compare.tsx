@@ -219,6 +219,31 @@ export function Compare() {
                     ))}
                   </tr>
 
+                  {/* Nearby Services */}
+                  <tr className="hover:bg-gray-50 transition-colors">
+                    <td className="px-6 py-4 text-sm font-medium text-gray-700">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm">🛒</span>
+                        Nearby Services
+                      </div>
+                      <p className="text-xs text-gray-400 mt-0.5">POIs within 1km</p>
+                    </td>
+                    {compareListings.map((listing) => {
+                      const counts = compareListings.map(l => l.nearbyPOIs?.length || 0);
+                      const maxCount = Math.max(...counts);
+                      const count = listing.nearbyPOIs?.length || 0;
+                      const isBest = count === maxCount && maxCount > 0;
+                      return (
+                        <td key={listing.id} className="px-6 py-4">
+                          <span className={`font-bold ${isBest ? 'text-green-700' : 'text-gray-900'}`}>
+                            {count}
+                          </span>
+                          {isBest && <span className="text-xs text-green-600 ml-2 font-medium bg-green-50 px-2 py-0.5 rounded">Most</span>}
+                        </td>
+                      );
+                    })}
+                  </tr>
+
                   {/* Score Breakdown Divider */}
                   <tr>
                     <td colSpan={4} className="px-6 py-3 bg-[#1E3A8A]/5">

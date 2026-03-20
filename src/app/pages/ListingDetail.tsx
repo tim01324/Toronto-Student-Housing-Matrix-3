@@ -6,8 +6,10 @@ import 'mapbox-gl/dist/mapbox-gl.css';
 import { StepIndicator } from '../components/StepIndicator';
 import { PageTransition } from '../components/PageTransition';
 import { useCompare } from '../context/CompareContext';
-import { buildListings } from '../data/mockData';
+import { buildListings, mockListings } from '../data/mockData';
 import { useTTCStops } from '../hooks/useTTCStops';
+import { getDistanceMeters } from '../services/osmAmenityService';
+import { useNearbyAmenities } from '../hooks/useNearbyAmenities';
 
 const tokenPart1 = 'pk.eyJ1IjoidGltMDEzMjQiLCJhIjoiY21taH';
 const tokenPart2 = 'hkZGM4MG10NTJwcHNiMnIxa2FsciJ9.MOLHj9Y_LUQcB1b2aUVSUQ';
@@ -26,9 +28,11 @@ export function ListingDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { status: ttcStatus, stopsCount, cacheDate } = useTTCStops();
+  const listingsForCoords = useMemo(() => mockListings.map(l => ({ id: l.id, lat: l.lat, lng: l.lng })), []);
+  const { poiData } = useNearbyAmenities(listingsForCoords);
   const listings = useMemo(
-    () => buildListings(),
-    [ttcStatus, stopsCount, cacheDate?.getTime()],
+    () => buildListings(poiData),
+    [ttcStatus, stopsCount, cacheDate?.getTime(), poiData]
   );
   const listing = listings.find(l => l.id === id) || listings[0];
   const { compareListDirs, toggleCompare } = useCompare();
@@ -83,6 +87,22 @@ export function ListingDetail() {
         `<div style="font-family:Inter,sans-serif;font-size:11px;font-weight:600;color:#1E40AF;">${ns.stop.name}</div><div style="font-size:10px;color:#555;">${ns.walkMinutes} min walk · ${ns.stop.line}</div>`
       );
       new mapboxgl.Marker({ element: tEl }).setLngLat([ns.stop.lng, ns.stop.lat]).setPopup(tp).addTo(miniMap.current!);
+    });
+
+    // POI markers
+    listing.nearbyPOIs?.forEach((poi) => {
+      let icon = '📍';
+      let color = '#6b7280';
+      if (poi.category === 'supermarket') { icon = '🛒'; color = '#16a34a'; }
+      if (poi.category === 'pharmacy') { icon = '➕'; color = '#dc2626'; }
+      if (poi.category === 'library') { icon = '📚'; color = '#2563eb'; }
+
+      const poiEl = document.createElement('div');
+      poiEl.innerHTML = `<div style="width:20px;height:20px;border-radius:50%;background:${color};border:2px solid white;display:flex;align-items:center;justify-content:center;box-shadow:0 2px 6px rgba(0,0,0,0.3);font-size:9px;">${icon}</div>`;
+      const poiPopup = new mapboxgl.Popup({ offset: 10, closeButton: false }).setHTML(
+        `<div style="font-family:Inter,sans-serif;font-size:10px;font-weight:600;color:${color};text-transform:capitalize;">${icon} ${poi.name}</div>`
+      );
+      new mapboxgl.Marker({ element: poiEl }).setLngLat([poi.lng, poi.lat]).setPopup(poiPopup).addTo(miniMap.current!);
     });
   }, [miniMapLoaded, listing]);
 
@@ -330,6 +350,44 @@ export function ListingDetail() {
                       <span className="text-sm font-medium text-gray-700">{amenity}</span>
                     </div>
                   ))}
+                </div>
+              </div>
+
+              {/* Nearby Essential Services */}
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-lg font-semibold text-gray-900">Nearby Essential Services</h3>
+                  <span className="text-xs text-gray-400 bg-gray-50 border border-gray-200 px-2 py-1 rounded-md">
+                    Source: OpenStreetMap (Overpass API)
+                  </span>
+                </div>
+                <div className="space-y-3">
+                  {(['supermarket', 'pharmacy', 'library'] as const).map(cat => {
+                    const catPOIs = listing.nearbyPOIs?.filter(p => p.category === cat) || [];
+                    const count = catPOIs.length;
+                    if (count === 0) return (
+                      <div key={cat} className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100 opacity-60">
+                         <div className="text-lg">{cat === 'supermarket' ? '🛒' : cat === 'pharmacy' ? '➕' : '📚'}</div>
+                         <div className="text-sm text-gray-600 capitalize">No {cat}s within 1km</div>
+                      </div>
+                    );
+
+                    let nearestDist = Infinity;
+                    catPOIs.forEach(p => {
+                      const d = getDistanceMeters(listing.lat, listing.lng, p.lat, p.lng);
+                      if (d < nearestDist) nearestDist = d;
+                    });
+                    
+                    return (
+                      <div key={cat} className="flex items-center gap-3 p-3 bg-blue-50 rounded-lg border border-blue-100">
+                         <div className="text-lg">{cat === 'supermarket' ? '🛒' : cat === 'pharmacy' ? '➕' : '📚'}</div>
+                         <div className="flex-1">
+                           <div className="text-sm font-semibold text-gray-900 capitalize">{cat}s: {count} within 1km</div>
+                           <div className="text-xs text-gray-500 mt-0.5">Nearest: {nearestDist}m away</div>
+                         </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </div>
